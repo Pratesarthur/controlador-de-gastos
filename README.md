@@ -17,7 +17,8 @@ O projeto consiste no planejamento e desenvolvimento de um aplicativo de control
 
 ## 👥 Integrantes
 
-- Nome do integrante 1
-- Nome do integrante 2
-- Nome do integrante 3
-- Nome do integrante 4
+- Arthur Magalhães Prates
+- Gustavo Martins Luna
+- João Vitor de Oliveira
+- Juan Cecilio de Lima Silva
+- Mateus da Silva Almeida
