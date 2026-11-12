@@ -1,0 +1,34 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+#arquivos locais
+ReferÃªncia Visual
+
+.dart_tool/
+.idea/
+build/
+*.iml
+local.properties
+.kotlin/
+lib_backup/
+Referência Visual/
+/app/
+/build.gradle.kts
+/settings.gradle.kts
+/gradle/
+/gradlew
+/gradlew.bat
+/gradle.properties
