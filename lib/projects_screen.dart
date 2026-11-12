@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'data.dart';
+import 'package:flutter/services.dart';
+import 'store.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
+/// Metas: savings goals with progress and quick contributions.
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({super.key});
   @override
@@ -11,61 +13,63 @@ class ProjectsScreen extends StatefulWidget {
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
   int _tab = 0;
-  static const _tabs = ['Active', 'Completed', 'Archived'];
-  static const _meta = [
-    ('active projects', 'Due date', C.accent),
-    ('completed this quarter', 'Latest', C.accent),
-    ('archived projects', 'Restore', C.accent),
-  ];
+  static const _tabs = ['Em andamento', 'Concluídas'];
 
   @override
-  Widget build(BuildContext context) {
-    final list = projects.where((p) => p.state.index == _tab).toList();
-    final m = _meta[_tab];
-    return ScreenList(
-      title: 'Projects',
-      subtitle: '12 active · 3 due this week',
-      children: [
-        Reveal(index: 1, child: SegmentedPill(labels: _tabs, index: _tab, onChanged: (i) => setState(() => _tab = i))),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(
-            child: AnimatedSwitcher(
-              duration: Motion.fast,
-              child: Text('${list.length} ${m.$1}', key: ValueKey(_tab), style: T.small),
-            ),
-          ),
-          Text(m.$2, style: T.small.copyWith(color: m.$3, fontWeight: FontWeight.w600)),
-        ]),
-        const SizedBox(height: 10),
-        // Keyed by tab → whole list cross-fades and cards re-stagger in.
-        AnimatedSwitcher(
-          duration: Motion.base,
-          switchInCurve: Motion.curve,
-          transitionBuilder: (c, a) => FadeTransition(opacity: a, child: c),
-          layoutBuilder: (cur, prev) => Stack(alignment: Alignment.topCenter, children: [...prev, ?cur]),
-          child: Column(
-            key: ValueKey(_tab),
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Store.i,
+        builder: (context, _) {
+          final all = Store.i.goals;
+          final list = all.where((g) => g.done == (_tab == 1)).toList();
+          final saved = all.fold(0.0, (a, g) => a + g.saved);
+          final target = all.fold(0.0, (a, g) => a + g.target);
+          return ScreenList(
+            title: 'Metas',
+            subtitle: '${all.where((g) => !g.done).length} em andamento · ${all.where((g) => g.done).length} concluída(s)',
             children: [
-              for (var i = 0; i < list.length; i++)
-                Reveal(index: i, child: Padding(padding: const EdgeInsets.only(bottom: 10), child: _ProjectCard(list[i]))),
+              Reveal(
+                index: 1,
+                child: SoftCard(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Total guardado', style: T.small),
+                    const SizedBox(height: 6),
+                    AnimatedAmount(saved, format: brl, style: T.big.copyWith(fontSize: 30)),
+                    const SizedBox(height: 2),
+                    Text('de ${brl(target, dec: 0)} em ${all.length} metas', style: T.small),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Reveal(index: 2, child: SegmentedPill(labels: _tabs, index: _tab, onChanged: (i) => setState(() => _tab = i))),
+              const SizedBox(height: 12),
+              AnimatedSwitcher(
+                duration: Motion.base,
+                switchInCurve: Motion.curve,
+                transitionBuilder: (c, a) => FadeTransition(opacity: a, child: c),
+                layoutBuilder: (cur, prev) => Stack(alignment: Alignment.topCenter, children: [...prev, ?cur]),
+                child: Column(
+                  key: ValueKey(_tab),
+                  children: [
+                    for (var i = 0; i < list.length; i++)
+                      Reveal(index: i, child: Padding(padding: const EdgeInsets.only(bottom: 10), child: _GoalCard(list[i]))),
+                    if (list.isEmpty)
+                      const Padding(padding: EdgeInsets.all(32), child: Center(child: Text('Nenhuma meta aqui', style: T.sub))),
+                  ],
+                ),
+              ),
             ],
-          ),
-        ),
-      ],
-    );
-  }
+          );
+        },
+      );
 }
 
-class _ProjectCard extends StatelessWidget {
-  final Project p;
-  const _ProjectCard(this.p);
+class _GoalCard extends StatelessWidget {
+  final Goal g;
+  const _GoalCard(this.g);
 
   @override
   Widget build(BuildContext context) {
-    final done = p.state == ProjectState.completed;
-    final archived = p.state == ProjectState.archived;
-    final bar = done ? C.green : (archived ? C.faint : C.ink);
+    final bar = g.done ? C.green : C.ink;
     return SoftCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -73,27 +77,25 @@ class _ProjectCard extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(11)),
-            child: Icon(p.icon, size: 17, color: C.ink),
+            child: Icon(g.icon, size: 17, color: C.ink),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(p.name, style: T.body),
-              Text(p.client, style: T.small),
+              Text(g.name, style: T.body),
+              Text(g.deadline, style: T.small),
             ]),
           ),
-          const Icon(Icons.more_horiz_rounded, color: C.muted, size: 18),
+          if (g.done)
+            const Pill('Concluída', fg: C.green, bg: C.greenBg)
+          else
+            Pill('${(g.progress * 100).round()}%', fg: C.accent, bg: const Color(0xFFFFEEE6)),
         ]),
         const SizedBox(height: 12),
-        Row(children: [
-          Expanded(
-            child: Text.rich(TextSpan(children: [
-              TextSpan(text: compact(p.spent), style: T.body.copyWith(fontSize: 12.5)),
-              TextSpan(text: ' of ${compact(p.budget)}', style: T.small),
-            ])),
-          ),
-          Text('${(p.progress * 100).round()}%', style: T.body.copyWith(fontSize: 12.5)),
-        ]),
+        Text.rich(TextSpan(children: [
+          TextSpan(text: brl(g.saved, dec: 0), style: T.body.copyWith(fontSize: 12.5)),
+          TextSpan(text: ' de ${brl(g.target, dec: 0)}', style: T.small),
+        ])),
         const SizedBox(height: 7),
         ClipRRect(
           borderRadius: BorderRadius.circular(3),
@@ -102,7 +104,7 @@ class _ProjectCard extends StatelessWidget {
             color: C.track,
             alignment: Alignment.centerLeft,
             child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: p.progress),
+              tween: Tween(begin: 0, end: g.progress),
               duration: const Duration(milliseconds: 900),
               curve: Curves.easeOutCubic,
               builder: (_, v, _) => FractionallySizedBox(
@@ -110,14 +112,24 @@ class _ProjectCard extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Row(children: [
-          AvatarStack(p.team),
-          const Spacer(),
-          Pill(p.tag,
-              fg: done ? C.green : (archived ? C.muted : C.accent),
-              bg: done ? C.greenBg : (archived ? C.bg : const Color(0xFFFFEEE6))),
-        ]),
+        if (!g.done) ...[
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: Text('Faltam ${brl(g.target - g.saved, dec: 0)}', style: T.small)),
+            Pressable(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                Store.i.contribute(g, 100);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(color: C.ink, borderRadius: BorderRadius.circular(10)),
+                child: const Text('+ R\$ 100',
+                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ]),
+        ],
       ]),
     );
   }

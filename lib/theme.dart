@@ -9,6 +9,8 @@ class C {
   static const faint = Color(0xFFB4B4B8);
   static const track = Color(0xFFEAEAEC);
   static const accent = Color(0xFFFF4D0D);
+  static const blue = Color(0xFF2F6BFF); // selection accent (calendar)
+  static const blueLight = Color(0xFF7DB0FF);
   static const green = Color(0xFF16A34A);
   static const greenBg = Color(0xFFE7F6EC);
   static const amber = Color(0xFFD97706);

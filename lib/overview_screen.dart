@@ -1,11 +1,13 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'accounts_screen.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Home ("Início"): month selector, balance, budget, category donut,
-/// upcoming bills and recent transactions.
+/// Home ("Início"): total available, spending donut, favorite account + card cycle,
+/// recent transactions.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
@@ -19,19 +21,18 @@ class HomeScreen extends StatelessWidget {
             physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 130),
             children: [
-              Reveal(child: _MonthBar(s)),
+              Reveal(child: _TotalCard(s)),
               const SizedBox(height: 16),
-              Reveal(index: 1, child: _BalanceCard(s)),
+              Reveal(index: 1, child: MonthBar(s)),
               const SizedBox(height: 14),
               Reveal(index: 2, child: _CategoryCard(s)),
               const SizedBox(height: 14),
-              Reveal(index: 3, child: const _BillsCard()),
+              Reveal(index: 3, child: _AccountsCard(s)),
               const SizedBox(height: 22),
               Reveal(
                 index: 4,
-                child: Row(children: [
-                  const Expanded(child: Text('Últimas transações', style: T.body)),
-                  Text('Ver todas ▸', style: T.small.copyWith(color: C.ink, fontWeight: FontWeight.w600)),
+                child: const Row(children: [
+                  Expanded(child: Text('Últimas transações', style: T.body)),
                 ]),
               ),
               const SizedBox(height: 10),
@@ -58,87 +59,27 @@ class HomeScreen extends StatelessWidget {
       );
 }
 
-// ---------------------------------------------------------------- month bar
+// ---------------------------------------------------------------- total available
 
-class _MonthBar extends StatelessWidget {
+class _TotalCard extends StatelessWidget {
   final Store s;
-  const _MonthBar(this.s);
+  const _TotalCard(this.s);
   @override
-  Widget build(BuildContext context) => Row(children: [
-        RoundIcon(Icons.chevron_left_rounded, onTap: () => s.shiftMonth(-1)),
-        Expanded(
-          child: AnimatedSwitcher(
-            duration: Motion.base,
-            switchInCurve: Motion.curve,
-            transitionBuilder: (c, a) => FadeTransition(
-                opacity: a,
-                child: SlideTransition(position: Tween(begin: const Offset(0, 0.3), end: Offset.zero).animate(a), child: c)),
-            child: Column(
-              key: ValueKey(s.month),
-              children: [
-                Text(monthNames[s.month.month - 1], style: T.title.copyWith(fontSize: 22), textAlign: TextAlign.center),
-                Text('${s.month.year}', style: T.sub),
-              ],
-            ),
-          ),
-        ),
-        AnimatedOpacity(
-          duration: Motion.fast,
-          opacity: s.isCurrentMonth ? 0.35 : 1,
-          child: RoundIcon(Icons.chevron_right_rounded, onTap: () => s.shiftMonth(1)),
-        ),
-      ]);
-}
-
-// ---------------------------------------------------------------- balance
-
-class _BalanceCard extends StatelessWidget {
-  final Store s;
-  const _BalanceCard(this.s);
-  @override
-  Widget build(BuildContext context) {
-    final used = (s.expense / s.budget).clamp(0.0, 1.0);
-    final hot = used >= 0.8;
-    return SoftCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Saldo do mês', style: T.small),
-        const SizedBox(height: 6),
-        AnimatedAmount(s.balance, format: brl, style: T.big.copyWith(fontSize: 32)),
-        const SizedBox(height: 16),
-        Row(children: [
-          Expanded(child: _Flow('Receitas', s.income, Icons.arrow_downward_rounded, C.green, C.greenBg)),
-          const SizedBox(width: 10),
-          Expanded(child: _Flow('Despesas', s.expense, Icons.arrow_upward_rounded, C.accent, const Color(0xFFFFEEE6))),
+  Widget build(BuildContext context) => SoftCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Total disponível', style: T.small),
+          const SizedBox(height: 6),
+          AnimatedAmount(s.totalAvailable, format: brl, style: T.big.copyWith(fontSize: 36)),
+          const SizedBox(height: 2),
+          Text('somando ${s.accounts.length} ${s.accounts.length == 1 ? 'conta' : 'contas'}', style: T.small),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: _Flow('Receitas do mês', s.income, Icons.arrow_downward_rounded, C.green, C.greenBg)),
+            const SizedBox(width: 10),
+            Expanded(child: _Flow('Despesas do mês', s.expense, Icons.arrow_upward_rounded, C.accent, const Color(0xFFFFEEE6))),
+          ]),
         ]),
-        const SizedBox(height: 16),
-        Row(children: [
-          Expanded(child: Text('Orçamento · ${brl(s.budget, dec: 0)}', style: T.small)),
-          Text('${(s.expense / s.budget * 100).round()}% usado',
-              style: T.small.copyWith(color: hot ? C.accent : C.ink, fontWeight: FontWeight.w600)),
-        ]),
-        const SizedBox(height: 7),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: Container(
-            height: 6,
-            color: C.track,
-            alignment: Alignment.centerLeft,
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: used),
-              duration: const Duration(milliseconds: 900),
-              curve: Curves.easeOutCubic,
-              builder: (_, v, _) => FractionallySizedBox(
-                widthFactor: v,
-                child: AnimatedContainer(
-                    duration: Motion.base,
-                    decoration: BoxDecoration(color: hot ? C.accent : C.ink, borderRadius: BorderRadius.circular(3))),
-              ),
-            ),
-          ),
-        ),
-      ]),
-    );
-  }
+      );
 }
 
 class _Flow extends StatelessWidget {
@@ -160,7 +101,7 @@ class _Flow extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: T.small.copyWith(fontSize: 10.5)),
+              Text(label, style: T.small.copyWith(fontSize: 10.5), maxLines: 1, overflow: TextOverflow.ellipsis),
               AnimatedAmount(value, format: (v) => brl(v, dec: 0), style: T.body.copyWith(fontSize: 13.5)),
             ]),
           ),
@@ -168,55 +109,154 @@ class _Flow extends StatelessWidget {
       );
 }
 
-// ---------------------------------------------------------------- categories
+// ---------------------------------------------------------------- month bar
 
-class _CategoryCard extends StatelessWidget {
+class MonthBar extends StatelessWidget {
+  final Store s;
+  const MonthBar(this.s, {super.key});
+  @override
+  Widget build(BuildContext context) => Row(children: [
+        RoundIcon(Icons.chevron_left_rounded, onTap: () => s.shiftMonth(-1)),
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: Motion.base,
+            switchInCurve: Motion.curve,
+            transitionBuilder: (c, a) => FadeTransition(
+                opacity: a,
+                child: SlideTransition(position: Tween(begin: const Offset(0, 0.3), end: Offset.zero).animate(a), child: c)),
+            child: Column(
+              key: ValueKey(s.month),
+              children: [
+                Text(monthNames[s.month.month - 1], style: T.title.copyWith(fontSize: 22), textAlign: TextAlign.center),
+                Text('${s.month.year}', style: T.sub),
+              ],
+            ),
+          ),
+        ),
+        AnimatedOpacity(
+          duration: Motion.fast,
+          opacity: s.canGoNext ? 1 : 0.35,
+          child: RoundIcon(Icons.chevron_right_rounded, onTap: () => s.shiftMonth(1)),
+        ),
+      ]);
+}
+
+// ---------------------------------------------------------------- categories donut
+
+class _CategoryCard extends StatefulWidget {
   final Store s;
   const _CategoryCard(this.s);
   @override
+  State<_CategoryCard> createState() => _CategoryCardState();
+}
+
+class _CategoryCardState extends State<_CategoryCard> {
+  int? _sel;
+  static const double _size = 190;
+
+  void _pickAt(Offset p, List<(Category, double)> cats, double total) {
+    const c = Offset(_size / 2, _size / 2);
+    final d = p - c;
+    final r = d.distance;
+    if (total == 0 || r < _size * 0.28 || r > _size / 2 + 6) {
+      setState(() => _sel = null);
+      return;
+    }
+    var a = atan2(d.dy, d.dx) + pi / 2;
+    if (a < 0) a += 2 * pi;
+    var acc = 0.0;
+    for (var i = 0; i < cats.length; i++) {
+      acc += cats[i].$2 / total * 2 * pi;
+      if (a <= acc) {
+        HapticFeedback.selectionClick();
+        setState(() => _sel = _sel == i ? null : i);
+        return;
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final s = widget.s;
     final cats = s.byCategory;
     final total = s.expense;
+    final sel = (_sel != null && _sel! < cats.length) ? _sel : null;
+    final used = (s.expense / s.budget).clamp(0.0, 1.0);
+    final hot = used >= 0.8;
     return SoftCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Gastos por categoria', style: T.body),
         const SizedBox(height: 14),
-        Row(children: [
-          SizedBox(
-            width: 124,
-            height: 124,
-            child: TweenAnimationBuilder<double>(
-              key: ValueKey('${s.month}-${cats.length}-${total.round()}'),
-              tween: Tween(begin: 0, end: 1),
-              duration: const Duration(milliseconds: 1000),
-              curve: Curves.easeInOutCubic,
-              builder: (_, t, _) => CustomPaint(
-                painter: _DonutPainter([for (final c in cats) (c.$2, c.$1.color)], t),
-                child: Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    const Text('Total', style: T.small),
-                    Text(brl(total, dec: 0), style: T.body.copyWith(fontSize: 14)),
-                  ]),
+        Center(
+          child: GestureDetector(
+            onTapDown: (d) => _pickAt(d.localPosition, cats, total),
+            child: SizedBox(
+              width: _size,
+              height: _size,
+              child: TweenAnimationBuilder<double>(
+                key: ValueKey('${s.month}-${cats.length}-${total.round()}'),
+                tween: Tween(begin: 0, end: 1),
+                duration: const Duration(milliseconds: 1100),
+                curve: Curves.easeInOutCubic,
+                builder: (_, t, _) => CustomPaint(
+                  painter: _DonutPainter([for (final c in cats) (c.$2, c.$1.color)], t, sel),
+                  child: Center(
+                    child: AnimatedSwitcher(
+                      duration: Motion.fast,
+                      child: Column(
+                        key: ValueKey(sel),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(sel == null ? 'Total gasto' : cats[sel].$1.name, style: T.small),
+                          const SizedBox(height: 2),
+                          Text(brl(sel == null ? total : cats[sel].$2, dec: 0), style: T.big.copyWith(fontSize: 22)),
+                          if (sel != null && total > 0)
+                            Text('${(cats[sel].$2 / total * 100).toStringAsFixed(0)}% dos gastos',
+                                style: T.small.copyWith(color: cats[sel].$1.color == C.ink ? C.ink : C.muted)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(children: [
-              for (final c in cats.take(5))
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3.5),
-                  child: Row(children: [
-                    Container(width: 8, height: 8, decoration: BoxDecoration(color: c.$1.color, shape: BoxShape.circle)),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(c.$1.name, style: T.small.copyWith(color: C.ink))),
-                    Text('${(c.$2 / total * 100).round()}%', style: T.small),
-                  ]),
+        ),
+        const SizedBox(height: 14),
+        if (cats.isEmpty) const Center(child: Text('Sem despesas neste mês', style: T.sub)),
+        for (var i = 0; i < cats.length; i++)
+          Pressable(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              setState(() => _sel = _sel == i ? null : i);
+            },
+            child: AnimatedContainer(
+              duration: Motion.fast,
+              margin: const EdgeInsets.only(bottom: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+              decoration: BoxDecoration(
+                  color: sel == i ? C.bg : Colors.transparent, borderRadius: BorderRadius.circular(11)),
+              child: Row(children: [
+                Container(width: 9, height: 9, decoration: BoxDecoration(color: cats[i].$1.color, shape: BoxShape.circle)),
+                const SizedBox(width: 10),
+                Expanded(child: Text(cats[i].$1.name, style: T.body.copyWith(fontSize: 13))),
+                Text(brl(cats[i].$2), style: T.small.copyWith(color: C.ink)),
+                SizedBox(
+                  width: 44,
+                  child: Text('${(cats[i].$2 / total * 100).toStringAsFixed(0)}%',
+                      textAlign: TextAlign.right, style: T.body.copyWith(fontSize: 13, color: C.muted)),
                 ),
-            ]),
+              ]),
+            ),
           ),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: Text('Orçamento · ${brl(s.budget, dec: 0)}', style: T.small)),
+          Text('${(s.expense / s.budget * 100).round()}% usado',
+              style: T.small.copyWith(color: hot ? C.accent : C.ink, fontWeight: FontWeight.w600)),
         ]),
+        const SizedBox(height: 7),
+        ProgressBar(used, hot ? C.accent : C.ink, height: 6),
       ]),
     );
   }
@@ -225,63 +265,130 @@ class _CategoryCard extends StatelessWidget {
 class _DonutPainter extends CustomPainter {
   final List<(double, Color)> segs;
   final double t;
-  _DonutPainter(this.segs, this.t);
+  final int? sel;
+  _DonutPainter(this.segs, this.t, this.sel);
   @override
   void paint(Canvas canvas, Size size) {
-    const stroke = 14.0;
-    final rect = Rect.fromCircle(center: size.center(Offset.zero), radius: min(size.width, size.height) / 2 - stroke / 2);
+    const stroke = 22.0;
+    final rect = Rect.fromCircle(center: size.center(Offset.zero), radius: min(size.width, size.height) / 2 - stroke / 2 - 4);
     canvas.drawArc(rect, 0, 2 * pi, false, Paint()..style = PaintingStyle.stroke..strokeWidth = stroke..color = C.track);
     final total = segs.fold(0.0, (a, b) => a + b.$1);
     if (total == 0) return;
     var used = 0.0, start = -pi / 2;
     final budget = 2 * pi * t;
-    for (final s in segs) {
-      final full = s.$1 / total * 2 * pi;
+    for (var i = 0; i < segs.length; i++) {
+      final full = segs[i].$1 / total * 2 * pi;
       final drawn = (budget - used).clamp(0.0, full);
       used += full;
-      const gap = 0.07;
+      const gap = 0.05;
+      final isSel = i == sel;
       if (drawn > gap) {
-        canvas.drawArc(rect, start + gap / 2, drawn - gap, false,
-            Paint()..style = PaintingStyle.stroke..strokeWidth = stroke..strokeCap = StrokeCap.round..color = s.$2);
+        canvas.drawArc(
+            rect,
+            start + gap / 2,
+            drawn - gap,
+            false,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = isSel ? stroke + 8 : stroke
+              ..strokeCap = StrokeCap.butt
+              ..color = sel == null || isSel ? segs[i].$2 : segs[i].$2.withValues(alpha: 0.28));
       }
       start += full;
     }
   }
 
   @override
-  bool shouldRepaint(_DonutPainter o) => o.t != t || o.segs != segs;
+  bool shouldRepaint(_DonutPainter o) => o.t != t || o.sel != sel || o.segs != segs;
 }
 
-// ---------------------------------------------------------------- bills
+// ---------------------------------------------------------------- favorite account + card cycle
 
-class _BillsCard extends StatelessWidget {
-  const _BillsCard();
+class _AccountsCard extends StatelessWidget {
+  final Store s;
+  const _AccountsCard(this.s);
+
   @override
-  Widget build(BuildContext context) => SoftCard(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Próximas contas', style: T.body),
+  Widget build(BuildContext context) {
+    final acc = s.favAccount;
+    final card = s.favCard;
+    return SoftCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Expanded(child: Text('Conta e cartão favoritos', style: T.body)),
+          GestureDetector(
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountsScreen())),
+            child: Text('Gerenciar ▸', style: T.small.copyWith(color: C.ink, fontWeight: FontWeight.w600)),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        _Tile(
+          icon: Icons.account_balance_outlined,
+          title: acc.name,
+          caption: 'Dinheiro disponível',
+          child: AnimatedAmount(s.accountBalance(acc), format: brl, style: T.big.copyWith(fontSize: 24)),
+        ),
+        if (card != null) ...[
           const SizedBox(height: 8),
-          for (final b in bills)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(children: [
-                Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(11)),
-                    child: Icon(b.icon, size: 17, color: C.ink)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(b.name, style: T.body.copyWith(fontSize: 13)),
-                    Text(b.due, style: T.small.copyWith(color: C.accent)),
-                  ]),
-                ),
-                Text(brl(b.amount), style: T.body.copyWith(fontSize: 13)),
-              ]),
-            ),
+          _CardTile(s, card),
+        ],
+      ]),
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
+  final IconData icon;
+  final String title, caption;
+  final Widget child;
+  const _Tile({required this.icon, required this.title, required this.caption, required this.child});
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(16)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(icon, size: 16, color: C.ink),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title, style: T.body.copyWith(fontSize: 13))),
+          ]),
+          const SizedBox(height: 10),
+          Text(caption, style: T.small),
+          const SizedBox(height: 2),
+          child,
         ]),
       );
+}
+
+class _CardTile extends StatelessWidget {
+  final Store s;
+  final CardAcct card;
+  const _CardTile(this.s, this.card);
+  @override
+  Widget build(BuildContext context) {
+    final cy = s.cycleOf(card);
+    final frac = card.limit == 0 ? 0.0 : (cy.spent / card.limit).clamp(0.0, 1.0);
+    final left = cy.daysLeft;
+    return _Tile(
+      icon: Icons.credit_card_rounded,
+      title: card.name,
+      caption: 'Gasto no ciclo atual',
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        AnimatedAmount(cy.spent, format: brl, style: T.big.copyWith(fontSize: 24)),
+        const SizedBox(height: 10),
+        ProgressBar(frac, frac >= 0.8 ? C.accent : C.ink),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: Text('Limite ${brl(card.limit, dec: 0)}', style: T.small)),
+          Pill(left == 0 ? 'Fecha hoje' : 'Fecha em $left ${left == 1 ? 'dia' : 'dias'}',
+              fg: left <= 3 ? C.accent : C.muted, bg: left <= 3 ? const Color(0xFFFFEEE6) : Colors.white),
+        ]),
+        const SizedBox(height: 6),
+        Text('Ciclo: ${shortDate(cy.start)} a ${shortDate(cy.end)}', style: T.small),
+      ]),
+    );
+  }
 }
 
 // ---------------------------------------------------------------- transaction row
@@ -292,6 +399,11 @@ class TxnRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final inc = t.kind == Kind.income;
+    final sub = [
+      t.category.name,
+      dayLabel(t.date),
+      if (t.isInstallment) '${t.inst}/${t.instTotal}',
+    ].join(' · ');
     return Pressable(
       onTap: () {},
       child: SoftCard(
@@ -307,11 +419,18 @@ class TxnRow extends StatelessWidget {
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(t.title, style: T.body.copyWith(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-              Text('${t.category.name} · ${dayLabel(t.date)}', style: T.small),
+              Text(sub, style: T.small),
             ]),
           ),
-          Text('${inc ? '+' : '−'} ${brl(t.amount)}',
-              style: T.body.copyWith(fontSize: 13, color: inc ? C.green : C.ink)),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text('${inc ? '+' : '−'} ${brl(t.amount)}',
+                style: T.body.copyWith(fontSize: 13, color: inc ? C.green : C.ink)),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(t.isCard ? Icons.credit_card_rounded : Icons.account_balance_outlined, size: 10, color: C.faint),
+              const SizedBox(width: 3),
+              Text(Store.i.sourceName(t), style: T.small.copyWith(fontSize: 10)),
+            ]),
+          ]),
         ]),
       ),
     );

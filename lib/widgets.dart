@@ -129,6 +129,31 @@ class SoftCard extends StatelessWidget {
       );
 }
 
+/// Thin animated progress bar (value 0..1).
+class ProgressBar extends StatelessWidget {
+  final double value;
+  final Color color;
+  final double height;
+  const ProgressBar(this.value, this.color, {super.key, this.height = 5});
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: Container(
+          height: height,
+          color: C.track,
+          alignment: Alignment.centerLeft,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: value.clamp(0.0, 1.0)),
+            duration: const Duration(milliseconds: 900),
+            curve: Curves.easeOutCubic,
+            builder: (_, v, _) => FractionallySizedBox(
+                widthFactor: v,
+                child: Container(decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)))),
+          ),
+        ),
+      );
+}
+
 class Pill extends StatelessWidget {
   final String text;
   final Color fg, bg;
