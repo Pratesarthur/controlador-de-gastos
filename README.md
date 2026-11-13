@@ -143,3 +143,4 @@ flutter analyze
 ## Finalidade do Projeto
 
 Este projeto foi desenvolvido para nos familiarizarmos com uma nova IDE, linguagem, plataforma e abordagem de design. Além de construir o aplicativo, também praticamos o controle de versão com Git e GitHub, para entender desde o início como funciona um fluxo de trabalho profissional.
+
