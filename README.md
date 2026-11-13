@@ -57,16 +57,63 @@ contas e cartões de crédito, parcelas, metas de economia e análises, com tema
   <img src="docs/media/ajustes-tema.gif" width="220" alt="Configurações e tema escuro">
 </p>
 
-## Rodando o projeto
+## Instalação
 
-Pré-requisito: [Flutter](https://docs.flutter.dev/get-started/install) (SDK estável recente).
+### 1. Pré-requisitos
+
+| Ferramenta | Versão | Para quê |
+| --- | --- | --- |
+| [Git](https://git-scm.com/downloads) | qualquer recente | baixar o projeto |
+| [Flutter SDK](https://docs.flutter.dev/get-started/install) | 3.47 ou superior (Dart 3.13.7+) | executar o app |
+| [Android Studio](https://developer.android.com/studio) | recente | SDK do Android e emulador |
+| Xcode (somente macOS) | recente | rodar no iOS (deployment target 15.0) |
+
+Depois de instalar o Flutter, confira se está tudo certo no ambiente:
+
+```bash
+flutter doctor
+```
+
+Corrija o que aparecer com um ✗ (por exemplo, aceitar as licenças do Android com `flutter doctor --android-licenses`).
+
+### 2. Baixar o projeto
+
+```bash
+git clone https://github.com/Pratesarthur/controlador-de-gastos.git
+cd controlador-de-gastos
+```
+
+> O código do app está na branch `feature/flutter-app`. Se ela não for a padrão, use `git checkout feature/flutter-app`.
+
+### 3. Instalar as dependências
 
 ```bash
 flutter pub get
+```
+
+### 4. Executar
+
+Abra um emulador Android (Android Studio ▸ Device Manager), o simulador do iOS ou conecte um celular com
+a depuração USB ativada. Confira os dispositivos disponíveis e rode:
+
+```bash
+flutter devices
 flutter run
 ```
 
-Testes e análise estática:
+Se houver mais de um dispositivo, escolha com `flutter run -d <id-do-dispositivo>`.
+
+### 5. Gerar o app para instalar no celular (opcional)
+
+```bash
+flutter build apk --release
+```
+
+O arquivo fica em `build/app/outputs/flutter-apk/app-release.apk`. Copie-o para o aparelho Android e
+instale (pode ser necessário permitir instalação de fontes desconhecidas). Para iOS é preciso um Mac com Xcode
+e uma conta de desenvolvedor Apple: `flutter build ios`.
+
+### Testes e análise estática
 
 ```bash
 flutter test
