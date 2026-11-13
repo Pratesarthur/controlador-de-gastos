@@ -16,6 +16,10 @@ local.properties
 
 #arquivos locais
 Referência Visual
+.claude/
+.impeccable
+DESING.md
+PRODUCT.md
 
 .dart_tool/
 .idea/

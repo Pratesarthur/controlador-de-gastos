@@ -5,8 +5,11 @@ import 'theme.dart';
 import 'widgets.dart';
 
 /// Contas e cartões: list, choose the favorite (shown on Início) and add new ones.
+enum AccountsMode { both, accounts, cards }
+
 class AccountsScreen extends StatelessWidget {
-  const AccountsScreen({super.key});
+  final AccountsMode mode;
+  const AccountsScreen({super.key, this.mode = AccountsMode.both});
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -22,9 +25,19 @@ class AccountsScreen extends StatelessWidget {
                   Row(children: [
                     RoundIcon(Icons.arrow_back_rounded, onTap: () => Navigator.of(context).pop()),
                     const SizedBox(width: 12),
-                    const Expanded(child: Text('Contas e cartões', style: T.title)),
+                    Expanded(
+                      child: Text(
+                        switch (mode) {
+                          AccountsMode.accounts => 'Minhas contas',
+                          AccountsMode.cards => 'Meus cartões',
+                          _ => 'Contas e cartões',
+                        },
+                        style: T.title,
+                      ),
+                    ),
                   ]),
                   const SizedBox(height: 18),
+                  if (mode != AccountsMode.cards) ...[
                   _Header('Contas', 'Nova conta', () => _newAccount(context)),
                   for (final a in s.accounts)
                     _Row(
@@ -34,9 +47,11 @@ class AccountsScreen extends StatelessWidget {
                       fav: a.id == s.favAccountId,
                       onFav: () => s.setFavoriteAccount(a.id),
                     ),
-                  const SizedBox(height: 18),
+                  ],
+                  if (mode == AccountsMode.both) const SizedBox(height: 18),
+                  if (mode != AccountsMode.accounts) ...[
                   _Header('Cartões de crédito', 'Novo cartão', () => _newCard(context)),
-                  if (s.cards.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nenhum cartão cadastrado', style: T.sub)),
+                  if (s.cards.isEmpty) Padding(padding: EdgeInsets.all(16), child: Text('Nenhum cartão cadastrado', style: T.sub)),
                   for (final c in s.cards)
                     _Row(
                       icon: Icons.credit_card_rounded,
@@ -45,6 +60,7 @@ class AccountsScreen extends StatelessWidget {
                       fav: c.id == s.favCardId,
                       onFav: () => s.setFavoriteCard(c.id),
                     ),
+                  ],
                 ],
               );
             },
@@ -94,7 +110,7 @@ void _form(BuildContext context, String title, List<_Field> fields, bool Functio
       child: Container(
         margin: const EdgeInsets.all(8),
         padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30)),
+        decoration: BoxDecoration(color: C.surface, borderRadius: BorderRadius.circular(30)),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(title, style: T.title.copyWith(fontSize: 20)),
           const SizedBox(height: 14),
@@ -112,7 +128,7 @@ void _form(BuildContext context, String title, List<_Field> fields, bool Functio
                 decoration: InputDecoration(
                     border: InputBorder.none,
                     hintText: f.label,
-                    hintStyle: const TextStyle(color: C.faint, fontWeight: FontWeight.w400)),
+                    hintStyle: TextStyle(color: C.faint, fontWeight: FontWeight.w400)),
               ),
             ),
           const SizedBox(height: 4),
@@ -127,7 +143,7 @@ void _form(BuildContext context, String title, List<_Field> fields, bool Functio
               height: 50,
               width: double.infinity,
               decoration: BoxDecoration(color: C.ink, borderRadius: BorderRadius.circular(25)),
-              child: const Center(child: Text('Salvar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
+              child: Center(child: Text('Salvar', style: TextStyle(color: C.onInk, fontWeight: FontWeight.w600))),
             ),
           ),
         ]),

@@ -4,8 +4,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'add_sheet.dart';
 import 'analytics_screen.dart';
 import 'overview_screen.dart';
-import 'projects_screen.dart';
 import 'reports_screen.dart';
+import 'settings_screen.dart';
+import 'store.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -22,16 +23,40 @@ void main() {
 class FinanceApp extends StatelessWidget {
   const FinanceApp({super.key});
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'Finanças',
-        locale: const Locale('pt', 'BR'),
-        supportedLocales: const [Locale('pt', 'BR')],
-        localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        theme: buildTheme(),
-        home: const Shell(),
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: darkNotifier,
+        builder: (context, dark, _) {
+          C.dark = dark;
+          // Colours are read from [C] directly, so a theme switch rebuilds the whole tree.
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            title: 'Finanças',
+            locale: const Locale('pt', 'BR'),
+            supportedLocales: const [Locale('pt', 'BR')],
+            localizationsDelegates: GlobalMaterialLocalizations.delegates,
+            theme: buildTheme(),
+            builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+                statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+              ),
+              child: child!,
+            ),
+            home: KeyedSubtree(
+              key: ValueKey(dark),
+              child: ListenableBuilder(
+                listenable: Store.i,
+                builder: (context, _) => Store.i.signedIn ? const Shell() : const SignedOutScreen(),
+              ),
+            ),
+          );
+        },
       );
 }
+
+/// Remembered across theme switches (which rebuild the tree).
+int _lastTab = 0;
 
 class Shell extends StatefulWidget {
   const Shell({super.key});
@@ -40,21 +65,21 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
-  int _tab = 0;
+  int _tab = _lastTab;
   bool _adding = false;
 
   static const items = [
     (Icons.home_rounded, 'Início'),
     (Icons.insights_rounded, 'Análises'),
     (Icons.receipt_long_rounded, 'Transações'),
-    (Icons.flag_rounded, 'Metas'),
+    (Icons.settings_rounded, 'Ajustes'),
   ];
 
   Widget _screen() => switch (_tab) {
         0 => const HomeScreen(),
         1 => const AnalyticsScreen(),
         2 => const ReportsScreen(),
-        _ => const ProjectsScreen(),
+        _ => const SettingsScreen(),
       };
 
   Future<void> _add() async {
@@ -91,7 +116,7 @@ class _ShellState extends State<Shell> {
                 adding: _adding,
                 onTap: (i) {
                   HapticFeedback.selectionClick();
-                  setState(() => _tab = i);
+                  setState(() => _tab = _lastTab = i);
                 },
                 onAdd: _add,
               ),
@@ -150,7 +175,7 @@ class _NavBar extends StatelessWidget {
             margin: const EdgeInsets.only(top: 22), // keeps the + button inside the hit-test area
             padding: const EdgeInsets.symmetric(horizontal: 6),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: C.surface,
               borderRadius: BorderRadius.circular(28),
               boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 24, offset: Offset(0, 8))],
             ),
@@ -179,7 +204,7 @@ class _NavBar extends StatelessWidget {
                   turns: adding ? 0.125 : 0,
                   duration: Motion.base,
                   curve: Motion.spring,
-                  child: const Icon(Icons.add_rounded, color: Colors.white, size: 30),
+                  child: Icon(Icons.add_rounded, color: C.onInk, size: 30),
                 ),
               ),
             ),
