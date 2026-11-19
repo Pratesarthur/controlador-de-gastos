@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'month_picker.dart';
 import 'overview_screen.dart' show TxnRow;
+import 'statement_import_screen.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -81,7 +82,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
           return ScreenList(
             title: 'Transações',
             subtitle: '${monthNames[s.month.month - 1]} ${s.month.year} · ${all.length} lançamentos',
-            trailing: RoundIcon(Icons.filter_list_rounded, dot: _source != null || !s.isCurrentMonth, onTap: _openFilter),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RoundIcon(Icons.upload_file_rounded, onTap: () => openStatementImport(context)),
+                const SizedBox(width: 8),
+                RoundIcon(Icons.filter_list_rounded, dot: _source != null || !s.isCurrentMonth, onTap: _openFilter),
+              ],
+            ),
             children: [
               Reveal(
                 index: 1,

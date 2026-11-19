@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'accounts_screen.dart';
+import 'statement_import_screen.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -96,6 +97,13 @@ class SettingsScreen extends StatelessWidget {
                     () => Navigator.of(context).push(
                       MaterialPageRoute<void>(builder: (_) => const AccountsScreen(mode: AccountsMode.cards)),
                     ),
+                  ),
+                  Divider(height: 1, color: C.track),
+                  _NavRow(
+                    Icons.upload_file_rounded,
+                    'Importar extrato',
+                    'Ler PDF, CSV, OFX ou texto bancário',
+                    () => openStatementImport(context),
                   ),
                 ],
               ),

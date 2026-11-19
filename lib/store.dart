@@ -876,6 +876,54 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Adds multiple transactions in one batch and jumps to the most recent imported month.
+  void addBatch(
+    List<({
+      String title,
+      String categoryId,
+      String? subId,
+      double amount,
+      Kind kind,
+      DateTime date,
+      String accountId,
+      bool isCard,
+    })> entries,
+  ) {
+    if (entries.isEmpty) return;
+    DateTime? latest;
+    for (final e in entries) {
+      _create(
+        title: e.title,
+        categoryId: e.categoryId,
+        subId: e.subId,
+        amount: e.amount,
+        kind: e.kind,
+        date: e.date,
+        accountId: e.accountId,
+        isCard: e.isCard,
+      );
+      if (latest == null || e.date.isAfter(latest)) latest = e.date;
+    }
+    if (latest != null) {
+      final m = DateTime(latest.year, latest.month);
+      month = m.isAfter(lastMonth) ? lastMonth : m;
+    }
+    notifyListeners();
+  }
+
+  /// True when an entry with the same day, amount and kind already exists in the store.
+  bool hasSimilarTxn(DateTime date, double amount, Kind kind) {
+    final cents = (amount * 100).round();
+    return _items.any(
+      (t) =>
+          t.kind == kind &&
+          t.date.year == date.year &&
+          t.date.month == date.month &&
+          t.date.day == date.day &&
+          (t.amount * 100).round() == cents,
+    );
+  }
+
   Txn? byId(int id) {
     for (final t in _items) {
       if (t.id == id) return t;
