@@ -109,8 +109,8 @@ class SettingsScreen extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _NavRow(
                 Icons.lock_outline_rounded,
-                s.password == null ? 'Definir senha' : 'Alterar senha',
-                s.password == null ? 'Proteja o acesso ao app' : 'Troque sua senha de acesso',
+                'Alterar senha',
+                'Troque a senha da sua conta',
                 () => showPasswordSheet(context),
               ),
             ),
@@ -142,9 +142,7 @@ class SettingsScreen extends StatelessWidget {
         Text('Sair da conta?', style: T.title.copyWith(fontSize: 20)),
         const SizedBox(height: 6),
         Text(
-          Store.i.password == null
-              ? 'Seus dados continuam neste aparelho. Como você não definiu senha, basta tocar em Entrar para voltar.'
-              : 'Seus dados continuam neste aparelho. Para voltar você precisará da sua senha.',
+          'Seus dados ficam salvos na nuvem. Para voltar, entre com seu e-mail e senha em qualquer aparelho.',
           style: T.sub,
         ),
         const SizedBox(height: 16),
@@ -322,13 +320,11 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   final _s = Store.i;
   late final _name = TextEditingController(text: _s.profile.name);
-  late final _email = TextEditingController(text: _s.profile.email);
   String? _error;
 
   @override
   void dispose() {
     _name.dispose();
-    _email.dispose();
     super.dispose();
   }
 
@@ -344,13 +340,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   void _save() {
     final name = _name.text.trim();
-    final email = _email.text.trim();
     if (name.isEmpty) return setState(() => _error = 'Informe seu nome');
-    if (email.isNotEmpty && !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
-      return setState(() => _error = 'E-mail inválido');
-    }
     HapticFeedback.mediumImpact();
-    _s.updateProfile(name: name, email: email);
+    _s.updateProfile(name: name);
     Navigator.of(context).pop();
   }
 
@@ -403,7 +395,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
             const SizedBox(height: 24),
             _input(_name, 'Nome', icon: Icons.person_outline_rounded),
-            _input(_email, 'E-mail', type: TextInputType.emailAddress, icon: Icons.mail_outline_rounded),
+            // The e-mail is the login, so it is shown but not editable.
+            Container(
+              height: 48,
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(14)),
+              child: Row(
+                children: [
+                  Icon(Icons.mail_outline_rounded, size: 18, color: C.faint),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(_s.profile.email, style: T.sub, overflow: TextOverflow.ellipsis)),
+                  Icon(Icons.lock_outline_rounded, size: 16, color: C.faint),
+                ],
+              ),
+            ),
             if (_error != null) Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(_error!, style: T.small.copyWith(color: C.accent, fontWeight: FontWeight.w600)),
@@ -432,7 +438,7 @@ class _PasswordFormState extends State<_PasswordForm> {
   final _new = TextEditingController();
   final _confirm = TextEditingController();
   String? _error;
-  bool get _hasPassword => Store.i.password != null;
+  bool _busy = false;
 
   @override
   void dispose() {
@@ -442,24 +448,33 @@ class _PasswordFormState extends State<_PasswordForm> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (_busy) return;
     if (_new.text != _confirm.text) return setState(() => _error = 'As senhas não conferem');
-    final err = Store.i.changePassword(_cur.text, _new.text);
-    if (err != null) return setState(() => _error = err);
+    setState(() => _busy = true);
+    final err = await Store.i.changePassword(_cur.text, _new.text);
+    if (!mounted) return;
+    if (err != null) {
+      return setState(() {
+        _error = err;
+        _busy = false;
+      });
+    }
     HapticFeedback.mediumImpact();
+    final messenger = ScaffoldMessenger.of(context);
     Navigator.of(context).pop();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Senha atualizada')));
+    messenger.showSnackBar(const SnackBar(content: Text('Senha atualizada')));
   }
 
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      Text(_hasPassword ? 'Alterar senha' : 'Definir senha', style: T.title.copyWith(fontSize: 20)),
+      Text('Alterar senha', style: T.title.copyWith(fontSize: 20)),
       const SizedBox(height: 4),
-      Text('A senha fica somente neste aparelho e protege o acesso ao app depois de sair da conta.', style: T.sub),
+      Text('É a senha da sua conta: vale para entrar em qualquer aparelho.', style: T.sub),
       const SizedBox(height: 14),
-      if (_hasPassword) _input(_cur, 'Senha atual', obscure: true, icon: Icons.lock_outline_rounded),
+      _input(_cur, 'Senha atual', obscure: true, icon: Icons.lock_outline_rounded),
       _input(_new, 'Nova senha (mín. 6 caracteres)', obscure: true, icon: Icons.lock_reset_rounded),
       _input(_confirm, 'Confirmar nova senha', obscure: true, icon: Icons.check_circle_outline_rounded),
       if (_error != null)
@@ -467,31 +482,64 @@ class _PasswordFormState extends State<_PasswordForm> {
           padding: const EdgeInsets.only(bottom: 10),
           child: Text(_error!, style: T.small.copyWith(color: C.accent, fontWeight: FontWeight.w600)),
         ),
-      _BigButton('Salvar senha', onTap: _save),
+      _BigButton(_busy ? 'Salvando…' : 'Salvar senha', onTap: _save),
     ],
   );
 }
 
-// ---------------------------------------------------------------- signed-out screen
+// ---------------------------------------------------------------- confirm e-mail
 
-class SignedOutScreen extends StatefulWidget {
-  const SignedOutScreen({super.key});
+/// Shown after sign-up (or when logging into an unconfirmed account) until the link is opened.
+class VerifyEmailScreen extends StatefulWidget {
+  const VerifyEmailScreen({super.key});
   @override
-  State<SignedOutScreen> createState() => _SignedOutScreenState();
+  State<VerifyEmailScreen> createState() => _VerifyEmailScreenState();
 }
 
-class _SignedOutScreenState extends State<SignedOutScreen> {
-  final _pass = TextEditingController();
-  String? _error;
+class _VerifyEmailScreenState extends State<VerifyEmailScreen> with WidgetsBindingObserver {
+  bool _busy = false;
+  String? _error, _info;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void dispose() {
-    _pass.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  void _enter() {
-    if (!Store.i.signIn(_pass.text)) setState(() => _error = 'Senha incorreta');
+  /// Coming back from the e-mail app: check by ourselves, no button needed.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) Store.i.checkVerified();
+  }
+
+  Future<void> _check() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final ok = await Store.i.checkVerified();
+    if (!mounted || ok) return; // on success the app moves on by itself
+    setState(() {
+      _busy = false;
+      _info = null;
+      _error = 'Ainda não confirmado. Abra o link que enviamos para o seu e-mail.';
+    });
+  }
+
+  Future<void> _resend() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final err = await Store.i.resendVerification();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = err;
+      _info = err == null ? 'E-mail reenviado.' : null;
+    });
   }
 
   @override
@@ -506,23 +554,204 @@ class _SignedOutScreenState extends State<SignedOutScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Center(child: ProfileAvatar(size: 84)),
-                const SizedBox(height: 16),
-                Text('Olá, ${Store.i.profile.name}', textAlign: TextAlign.center, style: T.title),
-                const SizedBox(height: 4),
+                Center(
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(color: C.accentBg, borderRadius: BorderRadius.circular(22)),
+                    child: const Icon(Icons.mark_email_unread_outlined, color: C.accent, size: 34),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text('Confirme seu e-mail', textAlign: TextAlign.center, style: T.title),
+                const SizedBox(height: 6),
                 Text(
-                  Store.i.password == null ? 'Você saiu da conta.' : 'Digite sua senha para entrar.',
+                  'Enviamos um link para ${Store.i.user?.email ?? 'o seu e-mail'}. '
+                  'Abra-o para ativar sua conta. Não chegou? Veja também a caixa de spam.',
                   textAlign: TextAlign.center,
                   style: T.sub,
                 ),
                 const SizedBox(height: 24),
-                if (Store.i.password != null) _input(_pass, 'Senha', obscure: true, icon: Icons.lock_outline_rounded),
-                if (_error != null)
+                if (_error != null || _info != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: Text(_error!, textAlign: TextAlign.center, style: T.small.copyWith(color: C.accent, fontWeight: FontWeight.w600)),
+                    child: Text(
+                      _error ?? _info!,
+                      textAlign: TextAlign.center,
+                      style: T.small.copyWith(color: _error != null ? C.accent : C.green, fontWeight: FontWeight.w600),
+                    ),
                   ),
-                _BigButton('Entrar', onTap: _enter),
+                _BigButton(_busy ? 'Verificando…' : 'Já confirmei', onTap: _check),
+                const SizedBox(height: 8),
+                _BigButton('Reenviar e-mail', ghost: true, onTap: _resend),
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Center(
+                    child: Pressable(
+                      onTap: Store.i.signOut,
+                      child: Text('Usar outro e-mail', style: T.small.copyWith(color: C.accent, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------- login / sign-up
+
+/// Shown when nobody is signed in: "Entrar" with an existing account or "Criar conta".
+class AuthScreen extends StatefulWidget {
+  const AuthScreen({super.key});
+  @override
+  State<AuthScreen> createState() => _AuthScreenState();
+}
+
+class _AuthScreenState extends State<AuthScreen> {
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _pass = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _signUp = false, _demo = false, _busy = false;
+  String? _error, _info;
+
+  @override
+  void dispose() {
+    for (final c in [_name, _email, _pass, _confirm]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _toggle() => setState(() {
+    _signUp = !_signUp;
+    _error = _info = null;
+  });
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    FocusScope.of(context).unfocus();
+    String? err;
+    if (_email.text.trim().isEmpty || _pass.text.isEmpty) {
+      err = 'Preencha e-mail e senha';
+    } else if (_signUp && _name.text.trim().isEmpty) {
+      err = 'Informe seu nome';
+    } else if (_signUp && _pass.text != _confirm.text) {
+      err = 'As senhas não conferem';
+    }
+    if (err != null) return _show(err);
+    setState(() {
+      _busy = true;
+      _error = _info = null;
+    });
+    err = _signUp
+        ? await Store.i.signUp(_name.text, _email.text, _pass.text, demo: _demo)
+        : await Store.i.signIn(_email.text, _pass.text);
+    // On success the app switches screens by itself (Store listens to Firebase Auth).
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _error = err;
+      });
+    }
+  }
+
+  void _show(String err) => setState(() {
+    _error = err;
+    _info = null;
+  });
+
+  Future<void> _forgot() async {
+    if (_email.text.trim().isEmpty) return _show('Digite seu e-mail acima');
+    setState(() => _busy = true);
+    final err = await Store.i.resetPassword(_email.text);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = err;
+      _info = err == null ? 'Enviamos um link para redefinir a senha. Veja seu e-mail (e o spam).' : null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(color: C.ink, borderRadius: BorderRadius.circular(22)),
+                    child: Icon(Icons.account_balance_wallet_rounded, color: C.onInk, size: 34),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(_signUp ? 'Criar conta' : 'Bem-vindo de volta', textAlign: TextAlign.center, style: T.title),
+                const SizedBox(height: 4),
+                Text(
+                  _signUp ? 'Seus dados ficam salvos na nuvem.' : 'Entre para ver suas finanças.',
+                  textAlign: TextAlign.center,
+                  style: T.sub,
+                ),
+                const SizedBox(height: 24),
+                if (_signUp) _input(_name, 'Nome', icon: Icons.person_outline_rounded),
+                _input(_email, 'E-mail', type: TextInputType.emailAddress, icon: Icons.mail_outline_rounded),
+                _input(_pass, _signUp ? 'Senha (mín. 6 caracteres)' : 'Senha', obscure: true, icon: Icons.lock_outline_rounded),
+                if (_signUp) ...[
+                  _input(_confirm, 'Confirmar senha', obscure: true, icon: Icons.check_circle_outline_rounded),
+                  Pressable(
+                    onTap: () => setState(() => _demo = !_demo),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _demo ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                            size: 22,
+                            color: _demo ? C.accent : C.faint,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text('Começar com dados de exemplo', style: T.body.copyWith(fontSize: 13.5))),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                ],
+                if (_error != null || _info != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      _error ?? _info!,
+                      textAlign: TextAlign.center,
+                      style: T.small.copyWith(color: _error != null ? C.accent : C.green, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                _BigButton(_busy ? 'Aguarde…' : (_signUp ? 'Criar conta' : 'Entrar'), onTap: _submit),
+                const SizedBox(height: 8),
+                _BigButton(_signUp ? 'Já tenho conta' : 'Criar uma conta', ghost: true, onTap: _toggle),
+                if (!_signUp)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 14),
+                    child: Center(
+                      child: Pressable(
+                        onTap: _forgot,
+                        child: Text('Esqueci minha senha', style: T.small.copyWith(color: C.accent, fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

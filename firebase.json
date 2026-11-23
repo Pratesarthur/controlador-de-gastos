@@ -1,0 +1,24 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "app-financas-9d14b",
+          "appId": "1:743202896543:android:b5a0a32bfea207965340aa",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "app-financas-9d14b",
+          "configurations": {
+            "android": "1:743202896543:android:b5a0a32bfea207965340aa"
+          }
+        }
+      }
+    }
+  }
+}

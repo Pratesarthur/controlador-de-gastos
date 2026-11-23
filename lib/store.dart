@@ -1,15 +1,22 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'categories.dart';
+import 'cloud.dart';
 import 'theme.dart';
 
 export 'categories.dart';
 
-/// Simple in-memory store. Screens listen to it with ListenableBuilder.
-/// Swap for a real repository (SQLite/Firebase) later without touching the UI much.
+/// App state. Screens listen to it with ListenableBuilder.
+///
+/// The lists below are an in-memory copy of the signed-in user's Firestore data:
+/// every change is applied here first (so the UI updates instantly) and written to
+/// Firestore; Firestore listeners then keep the copy in sync (other devices, reconnects).
 
 /// A bank account (money available).
 class Account {
@@ -133,7 +140,21 @@ class Goal {
   bool get done => saved >= target;
 }
 
-/// Local-only profile (nothing leaves the device).
+/// Icons a goal can use (stored in Firestore by position, so only append to this list).
+const goalIcons = <IconData>[
+  Icons.flag_rounded,
+  Icons.shield_outlined,
+  Icons.flight_takeoff_rounded,
+  Icons.home_outlined,
+  Icons.directions_car_outlined,
+  Icons.laptop_mac_rounded,
+  Icons.school_outlined,
+  Icons.favorite_border_rounded,
+  Icons.celebration_outlined,
+  Icons.savings_outlined,
+];
+
+/// The signed-in user's profile (saved in users/{uid}).
 class Profile {
   String name = 'Usuário';
   String email = '';
@@ -195,6 +216,11 @@ DateTime addMonths(DateTime d, int k) {
 class Store extends ChangeNotifier {
   Store._() {
     goalSubsProvider = () => [for (final g in goals) Sub(g.id, g.name)];
+  }
+  static final Store i = Store._();
+
+  /// Example data for a new account (sign-up option), so the charts have something to show.
+  void _seedDemo() {
     final n = DateTime.now();
     DateTime day(int back) =>
         DateTime(n.year, n.month, n.day).subtract(Duration(days: back));
@@ -210,6 +236,12 @@ class Store extends ChangeNotifier {
     ]);
     favAccountId = 'cc';
     favCardId = 'card1';
+    goals.addAll([
+      Goal('g1', 'Reserva de emergência', 12000, 7800, Icons.shield_outlined, label: 'até dez 2027'),
+      Goal('g2', 'Viagem de férias', 5000, 2150, Icons.flight_takeoff_rounded, label: 'até jul 2027'),
+      Goal('g3', 'Notebook novo', 4500, 4500, Icons.laptop_mac_rounded, label: 'concluída'),
+      Goal('g4', 'Entrada do apartamento', 60000, 9400, Icons.home_outlined, label: 'até 2030'),
+    ]);
     _items.addAll([
       Txn(
         1,
@@ -354,7 +386,6 @@ class Store extends ChangeNotifier {
         ),
       ]);
     }
-    _nextId = 1000;
     // demo installments + a recurring subscription (feeds Análises ▸ Parcelas)
     final base = DateTime(n.year, n.month, 5);
     _create(
@@ -403,26 +434,241 @@ class Store extends ChangeNotifier {
       recurring: true,
     );
   }
-  static final Store i = Store._();
-
   final List<Txn> _items = [];
   final List<Account> accounts = [];
   final List<CardAcct> cards = [];
-  late String favAccountId, favCardId;
-  int _nextId = 1000;
+  final List<Goal> goals = [];
+  String favAccountId = '', favCardId = '';
+  int _nextId = 0;
   DateTime month = DateTime(DateTime.now().year, DateTime.now().month);
   double budget = 4000;
 
-  final List<Goal> goals = [
-    Goal('g1', 'Reserva de emergência', 12000, 7800, Icons.shield_outlined, label: 'até dez 2027'),
-    Goal('g2', 'Viagem de férias', 5000, 2150, Icons.flight_takeoff_rounded, label: 'até jul 2027'),
-    Goal('g3', 'Notebook novo', 4500, 4500, Icons.laptop_mac_rounded, label: 'concluída'),
-    Goal('g4', 'Entrada do apartamento', 60000, 9400, Icons.home_outlined, label: 'até 2030'),
-  ];
-
   final Profile profile = Profile();
-  bool signedIn = true;
-  String? password; // local lock only; null = no password set
+
+  // ------------------------------------------------------------ session (Firebase)
+
+  final _auth = FirebaseAuth.instance;
+  final _db = FirebaseFirestore.instance;
+
+  /// The signed-in Firebase user (null = show the login screen).
+  User? user;
+
+  /// False until Firebase tells us whether someone is already signed in.
+  bool authKnown = false;
+
+  /// True while the user's data is being downloaded for the first time.
+  bool loading = false;
+
+  /// Set when the data could not be loaded (e.g. blocked by the security rules).
+  String? loadError;
+
+  final _subs = <StreamSubscription<dynamic>>[];
+  final _ready = <String>{};
+  ({String name, bool demo})? _pendingSignUp;
+  bool _creatingProfile = false;
+
+  /// Unique id: never repeats, even across two phones using the same account.
+  int _newId() => _nextId = max(_nextId + 1, DateTime.now().microsecondsSinceEpoch);
+
+  DocumentReference<Json> get _userDoc => _db.collection('users').doc(user!.uid);
+  CollectionReference<Json> _col(String name) => _userDoc.collection(name);
+
+  /// Writes several changes at once (all succeed or none do). The UI doesn't wait:
+  /// Firestore saves locally right away and syncs with the server in the background.
+  void _commit(void Function(WriteBatch b) fill) {
+    if (user == null) return;
+    final b = _db.batch();
+    fill(b);
+    b.commit().catchError((Object e) => debugPrint('Firestore write failed: $e'));
+  }
+
+  /// Called once from main(), after Firebase.initializeApp().
+  void start() {
+    _auth.setLanguageCode('pt'); // Firebase's e-mails (confirmation, reset) go out in Portuguese
+    _auth.authStateChanges().listen(_onAuth);
+  }
+
+  /// Signed in, but the e-mail was not confirmed yet: show the "confirm your e-mail" screen.
+  bool get needsVerification => user != null && !user!.emailVerified;
+
+  void _onAuth(User? u) {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _subs.clear();
+    _ready.clear();
+    _clearLocal();
+    authKnown = true;
+    user = u;
+    loadError = null;
+    // Data is only downloaded once the e-mail is confirmed (the security rules demand it too).
+    loading = u != null && u.emailVerified;
+    if (u == null) _pendingSignUp = null;
+    notifyListeners();
+    if (u == null || !u.emailVerified) return;
+
+    _subs.add(_userDoc.snapshots().listen((d) {
+      final m = d.data();
+      if (m == null) return _createProfile(); // brand-new account: no document yet
+      profile.name = m['name'] as String? ?? profile.name;
+      profile.email = u.email ?? '';
+      profile.photo = (m['photo'] as Blob?)?.bytes;
+      favAccountId = m['favAccountId'] as String? ?? favAccountId;
+      favCardId = m['favCardId'] as String? ?? favCardId;
+      _loaded('user');
+    }, onError: _onLoadError));
+
+    void listen<E>(String name, Query<Json> q, List<E> into, E Function(DocumentSnapshot<Json>) parse) {
+      _subs.add(q.snapshots().listen((snap) {
+        into
+          ..clear()
+          ..addAll(snap.docs.map(parse));
+        _loaded(name);
+      }, onError: _onLoadError));
+    }
+
+    listen('transactions', _col('transactions'), _items, txnFromDoc);
+    listen('accounts', _col('accounts').orderBy('order'), accounts, accountFromDoc);
+    listen('cards', _col('cards').orderBy('order'), cards, cardFromDoc);
+    listen('goals', _col('goals').orderBy('order'), goals, goalFromDoc);
+  }
+
+  void _loaded(String part) {
+    _ready.add(part);
+    if (_ready.length == 5) loading = false;
+    if (month.isAfter(lastMonth)) month = lastMonth;
+    notifyListeners();
+  }
+
+  void _onLoadError(Object e) {
+    debugPrint('Firestore read failed: $e');
+    loadError = e is FirebaseException && e.code == 'permission-denied'
+        ? 'Acesso negado pelo banco de dados. Verifique as regras de segurança do Firestore.'
+        : 'Não foi possível carregar seus dados.\n$e';
+    loading = false;
+    notifyListeners();
+  }
+
+  void _clearLocal() {
+    _items.clear();
+    accounts.clear();
+    cards.clear();
+    goals.clear();
+    favAccountId = favCardId = '';
+    profile
+      ..name = 'Usuário'
+      ..email = ''
+      ..photo = null;
+    month = DateTime(DateTime.now().year, DateTime.now().month);
+  }
+
+  /// First sign-in of a new account: writes the profile, a starter account and (optionally) demo data.
+  void _createProfile() {
+    if (_creatingProfile) return;
+    _creatingProfile = true;
+    final u = user!;
+    final pending = _pendingSignUp;
+    _pendingSignUp = null;
+    final name = pending?.name ?? u.displayName ?? (u.email ?? 'Usuário').split('@').first;
+
+    if (pending?.demo ?? false) {
+      _seedDemo();
+    } else {
+      accounts.add(Account('cc', 'Conta Corrente', 0));
+      favAccountId = 'cc';
+    }
+    final b = _db.batch();
+    b.set(_userDoc, {
+      'name': name,
+      'email': u.email,
+      'favAccountId': favAccountId,
+      'favCardId': favCardId,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    for (final (k, a) in accounts.indexed) {
+      b.set(_col('accounts').doc(a.id), accountToMap(a, k));
+    }
+    for (final (k, c) in cards.indexed) {
+      b.set(_col('cards').doc(c.id), cardToMap(c, k));
+    }
+    for (final (k, g) in goals.indexed) {
+      b.set(_col('goals').doc(g.id), goalToMap(g, k));
+    }
+    for (final t in _items) {
+      b.set(_col('transactions').doc('${t.id}'), txnToMap(t));
+    }
+    b.commit().catchError(_onLoadError).whenComplete(() => _creatingProfile = false);
+  }
+
+  /// Returns an error message in Portuguese, or null on success.
+  Future<String?> signIn(String email, String pass) =>
+      _authCall(() => _auth.signInWithEmailAndPassword(email: email.trim(), password: pass));
+
+  /// Creates the account and e-mails a confirmation link. Nothing is saved in Firestore until
+  /// the link is opened, so nobody can set up an account on someone else's e-mail.
+  Future<String?> signUp(String name, String email, String pass, {bool demo = false}) async {
+    _pendingSignUp = (name: name.trim(), demo: demo);
+    final err = await _authCall(() async {
+      final cred = await _auth.createUserWithEmailAndPassword(email: email.trim(), password: pass);
+      await cred.user!.updateDisplayName(name.trim()); // kept by Firebase in case the app is closed
+      await cred.user!.sendEmailVerification();
+    });
+    if (err != null) _pendingSignUp = null;
+    return err;
+  }
+
+  Future<String?> resendVerification() => _authCall(() => _auth.currentUser!.sendEmailVerification());
+
+  /// Asks Firebase whether the link was opened. Returns true once the e-mail is confirmed.
+  Future<bool> checkVerified() async {
+    final u = _auth.currentUser;
+    if (u == null) return false;
+    try {
+      await u.reload();
+    } on FirebaseException {
+      return false;
+    }
+    final fresh = _auth.currentUser!;
+    if (!fresh.emailVerified) return false;
+    await fresh.getIdToken(true); // new token carries email_verified = true for the security rules
+    _onAuth(fresh);
+    return true;
+  }
+
+  Future<String?> resetPassword(String email) =>
+      _authCall(() => _auth.sendPasswordResetEmail(email: email.trim()));
+
+  Future<void> signOut() => _auth.signOut();
+
+  /// Firebase asks for the current password again before changing it.
+  Future<String?> changePassword(String current, String next) async {
+    final u = _auth.currentUser;
+    if (u == null || u.email == null) return 'Você não está conectado';
+    if (next.length < 6) return 'A nova senha precisa ter ao menos 6 caracteres';
+    return _authCall(() async {
+      await u.reauthenticateWithCredential(EmailAuthProvider.credential(email: u.email!, password: current));
+      await u.updatePassword(next);
+    });
+  }
+
+  Future<String?> _authCall(Future<void> Function() f) async {
+    try {
+      await f();
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return switch (e.code) {
+        'invalid-email' => 'E-mail inválido',
+        'invalid-credential' || 'wrong-password' || 'user-not-found' => 'E-mail ou senha incorretos',
+        'email-already-in-use' => 'Já existe uma conta com este e-mail',
+        'weak-password' => 'Senha fraca: use ao menos 6 caracteres',
+        'user-disabled' => 'Esta conta foi desativada',
+        'too-many-requests' => 'Muitas tentativas. Aguarde um pouco e tente de novo',
+        'network-request-failed' => 'Sem conexão com a internet',
+        'requires-recent-login' => 'Entre novamente para alterar a senha',
+        _ => 'Erro: ${e.message ?? e.code}',
+      };
+    }
+  }
 
   @override
   void notifyListeners() {
@@ -443,41 +689,29 @@ class Store extends ChangeNotifier {
   }
 
   void addGoal(String name, double target, DateTime? due, IconData icon, double initial) {
-    goals.add(Goal('g${_nextId++}', name, target, initial, icon, due: due));
+    final id = _newId();
+    final g = Goal('g$id', name, target, initial, icon, due: due);
+    goals.add(g);
+    _commit((b) => b.set(_col('goals').doc(g.id), goalToMap(g, id)));
     notifyListeners();
   }
 
   void removeGoal(Goal g) {
-    goals.remove(g);
+    goals.removeWhere((e) => e.id == g.id);
+    _commit((b) => b.delete(_col('goals').doc(g.id)));
     notifyListeners();
   }
 
-  void signOut() {
-    signedIn = false;
-    notifyListeners();
-  }
-
-  /// Returns false when a password is set and [pass] does not match.
-  bool signIn(String pass) {
-    if (password != null && pass != password) return false;
-    signedIn = true;
-    notifyListeners();
-    return true;
-  }
-
-  /// Returns an error message, or null on success.
-  String? changePassword(String current, String next) {
-    if (password != null && current != password) return 'Senha atual incorreta';
-    if (next.length < 6) return 'A nova senha precisa ter ao menos 6 caracteres';
-    password = next;
-    notifyListeners();
-    return null;
-  }
-
-  void updateProfile({String? name, String? email, Object? photo = _keep}) {
-    if (name != null) profile.name = name;
-    if (email != null) profile.email = email;
-    if (!identical(photo, _keep)) profile.photo = photo as Uint8List?;
+  /// The e-mail is the login, so it is not edited here.
+  void updateProfile({String? name, Object? photo = _keep}) {
+    final changes = <String, Object?>{};
+    if (name != null) changes['name'] = profile.name = name;
+    if (!identical(photo, _keep)) {
+      profile.photo = photo as Uint8List?;
+      // Small images (the picker shrinks them to 512 px) fit inside the document (1 MB limit).
+      changes['photo'] = profile.photo == null ? null : Blob(profile.photo!);
+    }
+    _commit((b) => b.update(_userDoc, changes));
     notifyListeners();
   }
 
@@ -541,25 +775,37 @@ class Store extends ChangeNotifier {
 
   void setFavoriteAccount(String id) {
     favAccountId = id;
+    _commit((b) => b.update(_userDoc, {'favAccountId': id}));
     notifyListeners();
   }
 
   void setFavoriteCard(String id) {
     favCardId = id;
+    _commit((b) => b.update(_userDoc, {'favCardId': id}));
     notifyListeners();
   }
 
   void addAccount(String name, double initial) {
-    final a = Account('a${_nextId++}', name, initial);
+    final id = _newId();
+    final a = Account('a$id', name, initial);
     accounts.add(a);
     if (accounts.length == 1) favAccountId = a.id;
+    _commit((b) {
+      b.set(_col('accounts').doc(a.id), accountToMap(a, id));
+      if (accounts.length == 1) b.update(_userDoc, {'favAccountId': a.id});
+    });
     notifyListeners();
   }
 
   void addCard(String name, int closingDay, double limit) {
-    final c = CardAcct('c${_nextId++}', name, closingDay.clamp(1, 28), limit);
+    final id = _newId();
+    final c = CardAcct('c$id', name, closingDay.clamp(1, 28), limit);
     cards.add(c);
     if (cards.length == 1) favCardId = c.id;
+    _commit((b) {
+      b.set(_col('cards').doc(c.id), cardToMap(c, id));
+      if (cards.length == 1) b.update(_userDoc, {'favCardId': c.id});
+    });
     notifyListeners();
   }
 
@@ -783,10 +1029,11 @@ class Store extends ChangeNotifier {
 
   // ------------------------------------------------------------ adding / editing
 
-  /// Creates the entries without notifying. For [count] > 1 one entry is created per month.
-  /// Installments: when [amountIsTotal] the total is split (the last one absorbs the rounding),
-  /// otherwise [amount] is the value of each one. Recurring entries always repeat [amount].
-  void _create({
+  /// Creates the entries without notifying or saving, and returns them. For [count] > 1 one entry
+  /// is created per month. Installments: when [amountIsTotal] the total is split (the last one
+  /// absorbs the rounding), otherwise [amount] is the value of each one. Recurring entries always
+  /// repeat [amount].
+  List<Txn> _create({
     required String title,
     required String categoryId,
     String? subId,
@@ -803,32 +1050,32 @@ class Store extends ChangeNotifier {
     final name = title.isEmpty ? (cat.subById(subId)?.name ?? cat.name) : title;
     final n = max(1, min(count, maxInstallments));
     if (n == 1) {
-      _items.add(
-        Txn(
-          _nextId++,
-          name,
-          categoryId,
-          amount,
-          kind,
-          date,
-          accountId: accountId,
-          isCard: isCard,
-          subId: subId,
-        ),
+      final t = Txn(
+        _newId(),
+        name,
+        categoryId,
+        amount,
+        kind,
+        date,
+        accountId: accountId,
+        isCard: isCard,
+        subId: subId,
       );
-      return;
+      _items.add(t);
+      return [t];
     }
     final split = amountIsTotal && !recurring;
     final totalCents = (amount * 100).round() * (split ? 1 : n);
     final perCents = split ? totalCents ~/ n : (amount * 100).round();
-    final group = _nextId;
+    final group = _newId();
+    final created = <Txn>[];
     for (var k = 0; k < n; k++) {
       final cents = (split && k == n - 1)
           ? totalCents - perCents * (n - 1)
           : perCents;
-      _items.add(
+      created.add(
         Txn(
-          _nextId++,
+          k == 0 ? group : _newId(),
           name,
           categoryId,
           cents / 100,
@@ -844,7 +1091,15 @@ class Store extends ChangeNotifier {
         ),
       );
     }
+    _items.addAll(created);
+    return created;
   }
+
+  void _saveTxns(Iterable<Txn> l) => _commit((b) {
+    for (final t in l) {
+      b.set(_col('transactions').doc('${t.id}'), txnToMap(t));
+    }
+  });
 
   void add({
     required String title,
@@ -859,7 +1114,7 @@ class Store extends ChangeNotifier {
     bool amountIsTotal = true,
     bool recurring = false,
   }) {
-    _create(
+    _saveTxns(_create(
       title: title,
       categoryId: categoryId,
       subId: subId,
@@ -871,7 +1126,7 @@ class Store extends ChangeNotifier {
       count: installments,
       amountIsTotal: amountIsTotal,
       recurring: recurring,
-    );
+    ));
     month = DateTime(DateTime.now().year, DateTime.now().month);
     notifyListeners();
   }
@@ -896,12 +1151,13 @@ class Store extends ChangeNotifier {
   void update(Txn updated, {bool following = false}) {
     final old = byId(updated.id);
     if (old == null) return;
+    final changed = <Txn>[];
     for (final e in _scope(old, following)) {
       final i = _items.indexWhere((x) => x.id == e.id);
       final date = updated.date == old.date
           ? e.date
           : addMonths(updated.date, e.inst - old.inst);
-      _items[i] = e.copyWith(
+      changed.add(_items[i] = e.copyWith(
         title: updated.title,
         categoryId: updated.categoryId,
         subId: updated.subId,
@@ -910,14 +1166,20 @@ class Store extends ChangeNotifier {
         date: date,
         accountId: updated.accountId,
         isCard: updated.isCard,
-      );
+      ));
     }
+    _saveTxns(changed);
     notifyListeners();
   }
 
   void remove(Txn t, {bool following = false}) {
     final ids = _scope(t, following).map((e) => e.id).toSet();
     _items.removeWhere((e) => ids.contains(e.id));
+    _commit((b) {
+      for (final id in ids) {
+        b.delete(_col('transactions').doc('$id'));
+      }
+    });
     if (month.isAfter(lastMonth)) month = lastMonth;
     notifyListeners();
   }
@@ -925,19 +1187,19 @@ class Store extends ChangeNotifier {
   /// Copies a single entry to today.
   void duplicate(Txn t) {
     final n = DateTime.now();
-    _items.add(
-      Txn(
-        _nextId++,
-        t.title,
-        t.categoryId,
-        t.amount,
-        t.kind,
-        DateTime(n.year, n.month, n.day),
-        accountId: t.accountId,
-        isCard: t.isCard,
-        subId: t.subId,
-      ),
+    final copy = Txn(
+      _newId(),
+      t.title,
+      t.categoryId,
+      t.amount,
+      t.kind,
+      DateTime(n.year, n.month, n.day),
+      accountId: t.accountId,
+      isCard: t.isCard,
+      subId: t.subId,
     );
+    _items.add(copy);
+    _saveTxns([copy]);
     notifyListeners();
   }
 }
