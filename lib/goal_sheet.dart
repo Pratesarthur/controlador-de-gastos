@@ -13,18 +13,7 @@ double parseMoney(String s) {
   return double.tryParse(n) ?? 0;
 }
 
-const _goalIcons = <IconData>[
-  Icons.flag_rounded,
-  Icons.shield_outlined,
-  Icons.flight_takeoff_rounded,
-  Icons.home_outlined,
-  Icons.directions_car_outlined,
-  Icons.laptop_mac_rounded,
-  Icons.school_outlined,
-  Icons.favorite_border_rounded,
-  Icons.celebration_outlined,
-  Icons.savings_outlined,
-];
+const _goalIcons = goalIcons;
 
 Future<void> showGoalSheet(BuildContext context) => showModalBottomSheet<void>(
   context: context,
