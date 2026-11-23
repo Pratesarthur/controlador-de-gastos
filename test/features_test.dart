@@ -11,7 +11,7 @@ import 'package:finance_app/goal_sheet.dart';
 import 'package:finance_app/theme.dart';
 
 void main() {
-  final s = Store.i;
+  final s = Store.i..startOffline();
   final start = DateTime(2040, 1, 15);
 
   test('recorrente repete o mesmo valor por até 120 meses', () {

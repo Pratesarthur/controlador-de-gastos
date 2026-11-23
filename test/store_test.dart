@@ -2,7 +2,7 @@ import 'package:finance_app/store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  final s = Store.i;
+  final s = Store.i..startOffline();
   final start = DateTime(2030, 1, 31);
 
   test('parcelado com valor total divide e a última parcela absorve o centavo', () {

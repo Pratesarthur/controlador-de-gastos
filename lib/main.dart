@@ -55,7 +55,7 @@ class FinanceApp extends StatelessWidget {
                 builder: (context, _) {
                   final s = Store.i;
                   if (!s.authKnown) return const _Splash();
-                  if (s.user == null) return const AuthScreen();
+                  if (s.user == null && !s.offline) return const AuthScreen();
                   if (s.needsVerification) return const VerifyEmailScreen();
                   if (s.loading || s.loadError != null) return _Splash(error: s.loadError);
                   return const Shell();

@@ -447,8 +447,21 @@ class Store extends ChangeNotifier {
 
   // ------------------------------------------------------------ session (Firebase)
 
-  final _auth = FirebaseAuth.instance;
-  final _db = FirebaseFirestore.instance;
+  // Getters (not fields) so the Store can exist without Firebase, e.g. in tests.
+  FirebaseAuth get _auth => FirebaseAuth.instance;
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+
+  /// Local-only mode: demo data, no login, nothing saved. Used by the automated tests,
+  /// which run without Firebase.
+  bool offline = false;
+
+  @visibleForTesting
+  void startOffline() {
+    if (offline) return;
+    offline = authKnown = true;
+    _seedDemo();
+    notifyListeners();
+  }
 
   /// The signed-in Firebase user (null = show the login screen).
   User? user;
@@ -1129,6 +1142,59 @@ class Store extends ChangeNotifier {
     ));
     month = DateTime(DateTime.now().year, DateTime.now().month);
     notifyListeners();
+  }
+
+  /// Adds multiple transactions in one batch and jumps to the most recent imported month.
+  void addBatch(
+    List<({
+      String title,
+      String categoryId,
+      String? subId,
+      double amount,
+      Kind kind,
+      DateTime date,
+      String accountId,
+      bool isCard,
+    })> entries,
+  ) {
+    if (entries.isEmpty) return;
+    DateTime? latest;
+    final created = <Txn>[];
+    for (final e in entries) {
+      created.addAll(_create(
+        title: e.title,
+        categoryId: e.categoryId,
+        subId: e.subId,
+        amount: e.amount,
+        kind: e.kind,
+        date: e.date,
+        accountId: e.accountId,
+        isCard: e.isCard,
+      ));
+      if (latest == null || e.date.isAfter(latest)) latest = e.date;
+    }
+    // Save to Firestore; a batch takes at most 500 writes, so long statements go in chunks.
+    for (var i = 0; i < created.length; i += 450) {
+      _saveTxns(created.skip(i).take(450));
+    }
+    if (latest != null) {
+      final m = DateTime(latest.year, latest.month);
+      month = m.isAfter(lastMonth) ? lastMonth : m;
+    }
+    notifyListeners();
+  }
+
+  /// True when an entry with the same day, amount and kind already exists in the store.
+  bool hasSimilarTxn(DateTime date, double amount, Kind kind) {
+    final cents = (amount * 100).round();
+    return _items.any(
+      (t) =>
+          t.kind == kind &&
+          t.date.year == date.year &&
+          t.date.month == date.month &&
+          t.date.day == date.day &&
+          (t.amount * 100).round() == cents,
+    );
   }
 
   Txn? byId(int id) {

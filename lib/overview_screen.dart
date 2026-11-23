@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'accounts_screen.dart';
 import 'month_picker.dart';
+import 'statement_import_screen.dart';
 import 'store.dart';
 import 'txn_actions.dart';
 import 'theme.dart';
@@ -38,6 +39,16 @@ class HomeScreen extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(child: Text('Últimas transações', style: T.body)),
+                GestureDetector(
+                  onTap: () => openStatementImport(context),
+                  child: Text(
+                    'Importar extrato ▸',
+                    style: T.small.copyWith(
+                      color: C.ink,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
